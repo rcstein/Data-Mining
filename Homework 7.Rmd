@@ -1,0 +1,276 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+<!--- Below are global settings for knitr. You can override any of them by adding the changes to individual chunks --->
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "70%", # set width of displayed images
+                      warning=FALSE,     # do not show R warnings
+                      message=FALSE)     # do not show R messages
+```
+
+<!--- Solution Region --->
+<style>
+#solution {
+  background-color: #8FBC8F;
+  border-style: solid;
+  border-color: blue;
+  padding: .5em;
+  margin: 20px
+}
+</style>
+
+
+
+**SYS 6018 | Fall 2019 | University of Virginia **
+
+*******************************************
+
+<!--- Load Required R packages here --->
+```{r, include=FALSE}
+library(FNN)
+library(tidyverse)
+digits <- function(x, k=2) format(round(x, k), nsmall=k)
+data.dir = 'https://raw.githubusercontent.com/mdporter/SYS6018/master/data'
+```
+
+
+### Problem 7.1: Bootstrapping 
+
+Bootstrap resampling can be used to quantify the uncertainty in a fitted curve. 
+
+
+a. Create a set of functions to generate data from the following distributions:
+\begin{align*}
+X &\sim \mathcal{U}(0, 2) \qquad \text{Uniform in $[0,2]$}\\
+Y &= 1 + 2x + 5\sin(5x) + \epsilon \\
+\epsilon &\sim \mathcal{N}(0,\, \sigma=2.5)
+\end{align*}
+
+<div id="solution">
+```{r}
+X.Sample <- function(n) runif(n=n, min = 0, max = 2)
+f <- function(x) 1 + 2*x + 5*sin(5*x)
+e <- function(n) rnorm(n=n, mean = 0, sd = 2.5)
+Y.Sample <- function(X, e) f(X) + e
+
+```
+
+</div>
+
+
+b. Simulate $n=100$ realizations from these distributions. Produce a scatterplot and draw the true regression line $f(x) = E[Y \mid X=x]$. Use `set.seed(711)` prior to generating the data.
+
+<div id="solution">
+```{r}
+set.seed(711)
+
+X.sim <- X.Sample(100)
+e.sim <- e(100)
+Y.sim <- Y.Sample(X.sim,e.sim)
+
+Simulation <- data.frame(x = X.sim, y = Y.sim)
+
+ggplot(data.frame(X.sim = X.sim, Y.sim = Y.sim), mapping = aes(x = X.sim, y=Y.sim)) + geom_point(color = "dodgerblue") + stat_function(fun = "f", color = "red") + ggtitle(label = "Simulated Data and True Function")
+
+```
+
+</div>
+
+
+
+c. Now fit a 5th degree polynomial. Produce a scatterplot and draw the estimated regression line.
+
+
+<div id="solution">
+```{r}
+model.d.5 <- lm(Y.sim ~ poly(X.sim, degree = 5))
+ggplot(data.frame(X.sim = X.sim, Y.sim = Y.sim), mapping = aes(x = X.sim, y=Y.sim)) + geom_point(color = "dodgerblue") + geom_smooth(method = "lm", data = Simulation, formula = y ~poly(x, degree = 5), color = "red") + ggtitle(label = "Simulated Data and degree 5 regression line")
+```
+
+</div>
+
+
+
+
+d. Draw $200$ bootstrap samples, fit a 5th degree polynomial to each bootstrap sample, and make predictions at `xseq = seq(0, 2, length=100)`
+    - Set the seed (use `set.seed(712)`) so your results are reproducible.
+    - Produce a scatterplot and add the $200$ bootstrap curves
+    
+<div id="solution">
+```{r}
+M = 200                          
+X.predict = data.frame(x = seq(0,2,length = 100))
+Bootstrap.sim <- data.frame(x = seq(0,2,length = 100), y = Y.Sample(X.predict, e = e.sim))
+set.seed(712)                   
+plot <- ggplot(Bootstrap.sim, mapping = aes(x = x, y = y))
+lines <- vector()
+points <- data.frame()
+for(m in 1:M){
+  #- sample from empirical distribution
+  ind = sample(100, replace=TRUE)    # sample indices with replacement
+  data.boot = Simulation[ind,]     # bootstrap sample
+  #- fit regression model
+  m.boot = lm(y~poly(x,degree=5), data=data.boot) # fit simple OLS
+  
+  Bootstrap.sim[,m+2] <- predict(m.boot, X.predict)
+  #Bootstrap.sim <- cbind(Bootstrap.sim, predict(m.boot, X.predict), row.names =)
+  lines <- append(lines, geom_line(stat = "smooth", data = data.boot, method = "lm", formula = y ~poly(x, degree = 5), se = F, alpha = .1, color = "dodgerblue"))
+  points <- rbind(points, data.boot)
+}
+
+plot + lines + geom_point(data = points, mapping = aes(x = x, y = y), colour = "grey", alpha = .3, size = 1)
+
+
+```
+
+</div>
+  
+    
+e. Calculate the pointwise 95% confidence intervals from the bootstrap samples. That is, for each $x \in xseq$, calculate the upper and lower limits such that only 5% of the curves fall outside the interval at $x$. 
+    - Remake the plot from part *c*, but add the upper and lower boundaries from the 95% confidence intervals. 
+
+
+<div id="solution">
+```{r}
+devs <- apply(Bootstrap.sim[,3:202], 1, sd)   
+means <- apply(Bootstrap.sim[,3:202], 1, mean)
+Estimate <- data.frame(x = seq(0,2, length = 100), estimate = means, sd = devs) %>% mutate(lower = estimate - (2*sd), upper = estimate + (2*sd))
+
+plot + lines + geom_point(data = Estimate, mapping = aes(x = x, y = estimate), size = .2) + geom_point(data = Estimate, mapping = aes(x = x, y = upper), size = .2) + geom_point(data = Estimate, mapping = aes(x = x, y = lower), size = .2) + ggtitle(label = "Mean, Upper 47.5%, and Lower 47.5% Prediction Values for X")
+```
+
+</div>
+
+
+### Problem 7.2: K-Fold cross-validation with $k$ nearest neighbors
+
+Run 10-fold cross-validation, on the data generated in part 1, to select the optimal $k$ in a k nearest neighbor (kNN) model. Then evaluate how well cross-validation performed by evaluating the performance on a large test set. The steps below will guide you.
+
+
+a. Use $10$ fold cross-validation to find the value of $k$ (i.e., neighborhood size) that provides the smallest estimated MSE using a kNN model. Search over $k=3,4,\ldots, 50$.
+    - Use `set.seed(721)` prior to generating the folds to ensure the results are replicable. 
+    - Report the optimal $k$, the corresponding estimated MSE, and produce a plot with $k$ on the x-axis and the estimated MSE on the y-axis (optional: add 1-standard error bars). 
+
+
+<div id="solution">
+```{r}
+mse.comparison <- data.frame(K = seq(3,50), mse = rep(0,48))
+set.seed(721)
+for (k in 3:50) {
+start <- 1
+mse <- rep(0,10)
+for (fold in 1:10) {
+end <- start + 9
+test <- Simulation[start:end,]
+train <- Simulation[-(start:end),]
+knn.trial <- knn.reg(train = as.data.frame(train$x), test = as.data.frame(test$x), y = as.data.frame(train$y), k = k)
+mse[fold] <- mean((test$y - knn.trial$pred)^2)
+start <- end + 1
+}
+mse.comparison[k-2, 2] <- mean(mse)
+}
+print("Optimal K and MSE")
+filter(mse.comparison, mse == min(mse))
+ggplot(data = mse.comparison) + geom_line(mapping = aes(x = K, y = mse), colour = hcl(h = 250, l = 65)) + ggtitle("10-Fold CV MSE for Different Values of K")
+
+
+```
+
+</div>
+
+
+
+b. The $k$ (number of neighbors) in a kNN model determines the effective degrees of freedom *edf*. What is the optimal *edf*? Be sure to use the correct sample size when making this calculation. Produce a plot similar to that from part *a*, but use *edf* (effective degrees of freedom) on the x-axis. 
+
+
+<div id="solution">
+```{r}
+print("Optimal EDF")
+floor(90 / 12)
+
+mse.comparison <- mutate(mse.comparison, EDF = floor(90/K))
+ggplot(data = mse.comparison) + geom_line(mapping = aes(x = EDF, y = mse), colour = hcl(h = 250, l = 65)) + ggtitle("10-Fold CV MSE for Different Degrees of Freedom")
+```
+
+</div>
+
+
+
+c. After running cross-validation, a final model fit from *all* of the training data needs to be produced to make predictions. What value of $k$ would you choose? Why? 
+
+<div id="solution">
+12 because that value minimized mean square error over 10-fold cross validation sets. 
+</div>
+
+
+
+d. Now we will see how well cross-validation performed. Simulate a test data set of $50000$ observations from the same distributions. Use `set.seed(723)` prior to generating the test data. 
+    - Fit a set of kNN models, using the full training data, and calculate the mean squared error (MSE) on the test data for each model. Use the same $k$ values in *a*. 
+    - Report the optimal $k$, the corresponding *edf*, and MSE based on the test set. 
+
+<div id="solution">
+```{r}
+set.seed(723)
+X.test <- X.Sample(50000)
+e.test <- e(50000)
+Y.test <- Y.Sample(X.test, e.test)
+
+mse.comparison.true <- data.frame(K = seq(3,50), mse = rep(0,48))
+for (k in 3:50) {
+test <- X.test
+train <- Simulation
+knn.trial <- knn.reg(train = as.data.frame(train$x), test = as.data.frame(test), y = as.data.frame(train$y), k = k)
+start <- end + 1
+
+mse.comparison.true[k-2, 2] <- mean((Y.test - knn.trial$pred)^2)
+}
+mse.comparison.true <- mutate(mse.comparison.true, EDF = floor(100/K))
+print("Optimal K and MSE")
+filter(mse.comparison.true, mse == min(mse))
+```
+</div>
+
+
+e. Plot both the cross-validation estimated and true test error on the same plot. See Figure 5.6 in ISL (pg 182) as a guide. 
+    - Produce two plots: one with $k$ on the x-axis and one with *edf* on the x-axis.
+    
+    
+<div id="solution">
+```{r}
+ggplot(data = mse.comparison) + geom_line(mapping = aes(x = K, y = mse, colour = "CV MSE")) + geom_line(data = mse.comparison.true, mapping = aes(x = K, y = mse,colour = "True MSE")) + ggtitle("True vs. CV MSE for Different Values of K") 
+
+ggplot(data = mse.comparison) + geom_line(mapping = aes(x = EDF, y = mse, colour = "CV MSE")) + geom_line(data = mse.comparison.true, mapping = aes(x = EDF, y = mse,colour = "True MSE")) + ggtitle("True vs. CV MSE for Different Values of DF") 
+```
+
+</div>
+
+    
+    
+f. Based on the plots from *e*, does it appear that cross-validation worked as intended? How sensitive is the choice of $k$ on the resulting test MSE?      
+
+<div id="solution">
+Cross-validation overestimated the MSE for small values of K and underestimated it for large values of K. While it generated an optimal K of 12, while the true optimal K was 6, it only slightly underestimated the MSE at K = 12. In other words, using the cross-validated optimal k value would still generate a close-to-optimal estimate of the test data. 
+
+After k = 6, MSE icreases approximately linearly with increasing k.
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
